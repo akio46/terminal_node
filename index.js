@@ -2,7 +2,7 @@ var express = require('express')
 var app = express()
 const bodyParser = require('body-parser');
 
-// var job = require('./cron.js');
+var job = require('./cron.js');
 
 app.use(bodyParser.json());
 
