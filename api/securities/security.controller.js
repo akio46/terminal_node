@@ -156,7 +156,7 @@ function fetchSecuritiesInPage (pageNumber, cb) {
 	    	var total_pages = JSON.parse(body).total_pages;
 	    	var current_page = JSON.parse(body).current_page;
 
-	    	let securityArray = jsonArray.map ( obj => new Security({ticker: obj.ticker,
+	    	var securityArray = jsonArray.map ( obj => new Security({ticker: obj.ticker,
 														        	 name: obj.security_name,
 														        	 figi_ticker: obj.figi_ticker
 														        	 }) );
