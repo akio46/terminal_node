@@ -71,7 +71,7 @@ exports.fetchHistories = function(req, res) {
 	console.log('Start Fetch.....');
 	console.log(new Date);
 
-	let identifier = req.body.ticker;
+	var identifier = req.body.ticker;
 
 	fetchHistoriesInPage(identifier, 1, (err, total_pages) => {
 		if (err) {
@@ -122,7 +122,7 @@ function fetchHistoriesInPage (identifier, pageNumber, cb) {
 	    	var total_pages = JSON.parse(body).total_pages;
 	    	var current_page = JSON.parse(body).current_page;
 
-	    	let historyArray = jsonArray.map ( obj => new History({ticker: identifier,
+	    	var historyArray = jsonArray.map ( obj => new History({ticker: identifier,
 														        	 date: obj.date,
 														        	 close_price: obj.value
 														        	 }) );
