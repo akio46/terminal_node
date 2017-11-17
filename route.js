@@ -14,5 +14,6 @@ module.exports = function(app) {
 	});
 
 	app.use('/api/companies', require('./api/companies'));
-
+	app.use('/api/securities', require('./api/securities'));
+	app.use('/api/histories', require('./api/histories'));
 };

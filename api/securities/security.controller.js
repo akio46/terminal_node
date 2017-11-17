@@ -1,55 +1,53 @@
 var Config = require('../../config');
-var Company = require('./company.model.js');
+var Security = require('./security.model.js');
 var request = require('request');
 var moment = require('moment');
 var async = require('async');
 
-exports.getCompanies = function(req, res) {
+exports.getSecurities = function(req, res) {
 
-    Company.find({}, function(err, companies) {
+    Security.find({}, function(err, securities) {
         if (err) {
             res.status(402).send(err);
             return;
         }
-        res.json(companies);
+        res.json(securities);
     });   
 }
 
-exports.getCompanyByTicker = function(req, res) {
+exports.getSecurityByTicker = function(req, res) {
 
-    Company.find({ticker: req.params.ticker}, function(err, companies) {
+    Security.find({ticker: req.params.ticker}, function(err, securities) {
         if (err) {
             res.status(402).send(err);
             return;
         }
-	    if(companies.length == 0) {
-	        res.status(403).send('There is no company for this ticket')
+	    if(securities.length == 0) {
+	        res.status(403).send('There is no security for this ticket')
 	        return;
 	    }
-        res.json(companies[0]);
+        res.json(securities[0]);
     });   
 }
 
-exports.newCompany = function(req, res) {
+exports.newSecurity = function(req, res) {
 
     if( (req.body.ticker == '' || req.body.ticker == null) || (req.body.name == '' || req.body.name == null) ) {
         res.status(405).send('Missing Parameter');
 
     } else {
-	    Company.find({ticker: req.body.ticker}, function(err, companies) {
+	    Security.find({ticker: req.body.ticker}, function(err, securities) {
 	        if (err) {
 	            res.status(402).send(err);
 	            return;
 	        }
-		    if(companies.length == 0) {
-		    	var newCompany = new Company({
+		    if(securities.length == 0) {
+		    	var newSecurity = new Security({
 		        	ticker: req.body.ticker,
-		        	name: req.body.name,
-		        	cik: req.body.cik,
-		        	lei: req.body.lei,
-		        	latest_filing_date: req.body.latest_filing_date
+		        	name: req.body.security_name,
+		        	figi_ticker: req.body.figi_ticker
 		        });
-		        newCompany.save(function(err, data) {
+		        newSecurity.save(function(err, data) {
 		            if (err) {
 		                res.status(402).send(err);
 		                return;
@@ -57,18 +55,16 @@ exports.newCompany = function(req, res) {
 		            res.json(data);
 		        });
 		    } else {
-		    	companies[0].update({$set: {
+		    	securities[0].update({$set: {
 		        	ticker: req.body.ticker,
-		        	name: req.body.name,
-		        	cik: req.body.cik,
-		        	lei: req.body.lei,
-		        	latest_filing_date: req.body.latest_filing_date
+		        	name: req.body.security_name,
+		        	figi_ticker: req.body.figi_ticker
                 }}, function(err) {
                     if (err){
                         res.status(402).send(err);
                         return;
                     }
-                    res.json(companies[0]);
+                    res.json(securities[0]);
                 });
 		    }
 	    }); 
@@ -77,10 +73,10 @@ exports.newCompany = function(req, res) {
 
 var errNumbers = [];
 
-function abc(numbers, main_cb) {
+function seriesFetch(numbers, main_cb) {
 	async.eachSeries(numbers, function (page_number, next)
 		{
-		    fetchCompaniesInPage(page_number, (err, total_pages) =>
+		    fetchSecuritiesInPage(page_number, (err, total_pages) =>
 		    {
 		    	if (err) {
 		    		console.log('%d is not saved', page_number);
@@ -97,12 +93,11 @@ function abc(numbers, main_cb) {
 		    }
 
 		    if (errNumbers.length === 0) {
-		    	console.log('Finished!');
 		    	main_cb();
 		    } else {
 		    	console.log('There are some pages to be saved');
 		    	console.log(errNumbers);
-		    	abc(errNumbers, main_cb);
+		    	seriesFetch(errNumbers, main_cb);
 		    	errNumbers = [];
 		    }
 		 
@@ -110,9 +105,12 @@ function abc(numbers, main_cb) {
 
 }
 
-exports.fetchCompanies = function(req, res) {
+exports.fetchSecurities = function(req, res) {
 
-	fetchCompaniesInPage(1, (err, total_pages) => {
+	console.log('Start Fetch.....');
+	console.log(new Date);
+
+	fetchSecuritiesInPage(1, (err, total_pages) => {
 		if (err) {
 			console.log(err);
 			res.json('fail');
@@ -126,19 +124,22 @@ exports.fetchCompanies = function(req, res) {
 			}
 		}
 
-		abc(pageNumberArray, function() {
-
+		seriesFetch(pageNumberArray, function() {
+			console.log('Finish Fetch.....');
+			console.log(new Date);
+			res.json('success');
 		});
 
 	});
 
 }
 
-function fetchCompaniesInPage (pageNumber, cb) {
+function fetchSecuritiesInPage (pageNumber, cb) {
 	
-	var url = Config.intrinio_base_url + 'companies';
+	var url = Config.intrinio_base_url + 'securities';
 
-	var qs = {'page_number' : pageNumber};
+	var qs = {'page_number' : pageNumber,
+              'exch_symbol' : '^XSES'};
 	request(
 	    {   url : url,
 	        headers : {"Authorization" : Config.intrinio_header},
@@ -147,28 +148,30 @@ function fetchCompaniesInPage (pageNumber, cb) {
 	    function (error, response, body) {
 	    	if (error) {
 	    		console.log(error);
-	    		cb(error, null, pageNumber);
+	    		cb(error, null);
 	    		return;
 	    	}
-
-	    	console.log("There are body");
 
 	    	var jsonArray = JSON.parse(body).data;
 	    	var total_pages = JSON.parse(body).total_pages;
 	    	var current_page = JSON.parse(body).current_page;
-	    	Company.collection.insertMany(jsonArray, {ordered: false}, function (err, docs) {
+
+	    	let securityArray = jsonArray.map ( obj => new Security({ticker: obj.ticker,
+														        	 name: obj.security_name,
+														        	 figi_ticker: obj.figi_ticker
+														        	 }) );
+
+	    	Security.collection.insertMany(securityArray, {ordered: false}, function (err, docs) {
 
 			    if (err) {
-			        console.log('Companies in Page %d was saved with some duplicated errors.', current_page);
+			        console.log('securities in Page %d was saved with some duplicated errors.', current_page);
 			    } else {
-			        console.log('Companies in Page %d was saved without duplicated errors.', current_page);
+			        console.log('securities in Page %d was saved without duplicated errors.', current_page);
 			    }
 			    cb(null, total_pages);
 			});
 	    }
 	); 
-
-
 }
 
 

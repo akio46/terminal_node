@@ -1,6 +1,10 @@
 var express = require('express')
 var app = express()
+const bodyParser = require('body-parser');
 
+var job = require('./cron.js');
+
+app.use(bodyParser.json());
 
 var config = require('./config');
 var mongoose = require('mongoose');
@@ -12,8 +16,9 @@ app.use(express.static(__dirname + '/public'))
 // CREATE OUR ROUTER
 require('./route')(app);
 
-mongoose.connect(config.database); // connect to database
 
+// Mongoose Database connect
+mongoose.connect(config.database); // connect to database
 var db = mongoose.connection;
 db.on('error', function(err){
 	console.log('DB connection failed with error:', err);
@@ -21,6 +26,11 @@ db.on('error', function(err){
 db.once('open', function(){
 	console.log('DB connected');
 })
+
+
+//Cron job
+
+
 
 
 app.get('/', function(req, res) {
