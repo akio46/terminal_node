@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "start": "node --inspect index.js"
+    "start": "node --max_old_space_size=8192 index.js"
   },
   "dependencies": {
     "async": "^2.6.0",
