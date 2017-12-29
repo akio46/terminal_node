@@ -188,7 +188,6 @@ function seriesUpdateCorrelations(identifier, watchlist, returns, cb) {
 								           ticker2: secondIdentifier,
 								           coefficient: coefficient });
 		correlationArray.push(correlation);
-		console.log('  ' + i + ' -- ' + secondIdentifier);
 	}
 
 	if (correlationArray.length == 0) {
