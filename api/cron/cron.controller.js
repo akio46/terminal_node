@@ -1,46 +1,11 @@
 var Config = require('../../config');
-var History = require('./history.model.js');
+var History = require('../histories/history.model.js');
 var Watch = require('../watches/watch.model.js');
 var Security = require('../securities/security.model.js');
 var request = require('request');
 var moment = require('moment');
 var async = require('async');
 var _ = require('lodash');
-
-
-exports.getAllHistories = function(req, res) {
-
-    History.find({}, function(err, histories) {
-        if (err) {
-            res.status(402).send(err);
-            return;
-        }
-        res.json(histories);
-    });   
-
-    // History.findOne({ date: {$lt : new Date(2017, 10, 10)}, ticker: 'AAPL' }).sort({date: -1}).exec(function(err, history) {
-    //     if (err) {
-    //         res.status(402).send(err);
-    //         return;
-    //     }
-    //     res.json(history);
-    // });  
-}
-
-exports.getHistoriesByTicker = function(req, res) {
-
-    History.find({ticker: req.params.ticker}, function(err, histories) {
-        if (err) {
-            res.status(402).send(err);
-            return;
-        }
-	    if(histories.length == 0) {
-	        res.status(403).send('There is no history for this ticket')
-	        return;
-	    }
-        res.json(histories);
-    });   
-}
 
 
 
@@ -125,13 +90,59 @@ function seriesReturnUpdate(identifier, cb) {
 }
 
 
+////////// Start //////////////////
+
 var totalDailyPriceHistoriesArray = [];
 
-exports.updateDailyPriceHistories = function(req, res) {
+exports.start = function(req, res) {
 
 	totalDailyPriceHistoriesArray = [];
 
 	var date = req.body.date;
+
+	fetchDailyPriceHistories(date, function(error1){
+		if (error1) {
+			res.status(402).send(error1);
+	        return;
+	    }
+	    saveTotalDailyPriceHistories(function(error2){
+		    if (error2) {
+			    res.status(402).send(error2);
+				return;
+		    } 
+			updateTradingSecurities(date, function(error3, newSecurities){
+			    if (error3) {
+			    	res.status(402).send(error3);
+					return;
+			    } 
+			    fetchPriceHistoriesForSecurities(newSecurities, function(error4){
+			    	if (error4) {
+			    		res.status(402).send(error4);
+			    		return;
+			    	} 
+			    	updateReturnHistoriesForSecurities(newSecurities, function(error5){
+				    	if (error4) {
+				    		res.status(402).send(error5);
+				    		return;
+				    	} 
+				    	updateDailyReturnForAllSecurities(date, function(error6){
+					    	if (error6) {
+					    		res.status(402).send(error6);
+					    		return;
+					    	} 
+					    	res.json('success');
+				    	})
+			    	});
+			    });
+			})
+	    });
+	})
+}
+
+
+/// Fetch Daily Price Histories and Save
+
+function fetchDailyPriceHistories(date, cb){
 
 	console.log('\n');
 	console.log('************ Start Fetch Price for ' + date + ' ***************');
@@ -147,7 +158,7 @@ exports.updateDailyPriceHistories = function(req, res) {
 		fetchDailyPriceHistoriesInPage(exch_symbol, date, 1, (err, total_pages, total_count) => {
 			if (err) {
 				console.log(err);
-				res.json('fail');
+				cb(err);
 				return;
 			} 
 
@@ -164,7 +175,7 @@ exports.updateDailyPriceHistories = function(req, res) {
 
 			seriesDailyPriceFetch(exch_symbol, date, pageNumberArray, function(error) {
 				if (error) {
-					res.status(403).send(error);					
+					next(err);					
 				} else {
 					next();
 				}
@@ -175,43 +186,23 @@ exports.updateDailyPriceHistories = function(req, res) {
 	{
 	    if (err) {
 	        console.error('Error: ' + err.message);
-    		res.json('fail');
+    		cb(err);
 	        return;
 	    }
 
 	    console.log(date + " total trading securities count is " + totalDailyPriceHistoriesArray.length);
-
-		var bulk = History.collection.initializeOrderedBulkOp();
-
-	    for (var i = 0; i < totalDailyPriceHistoriesArray.length; i++) {
-	    	var history = totalDailyPriceHistoriesArray[i];
-	    	var real_date = parseDate(history.date);
-
-		    bulk.find({ 'ticker': history.ticker, date: real_date }).upsert().updateOne({ 
-		        "$set": { 'ticker': history.ticker,
-		        		  'date': real_date,
-		        		  'adj_close_price': history.adj_close }
-		    });
-	    }
-	    console.log('Saving on database...')
-	    bulk.execute(function(err, result) {
-	    	if (err) {
-	    		console.log(err);
-	    		res.json('fail');
-	            return;
-		    }
-		   	console.log('All price data is successfully saved on database');
-	   		console.log(new Date);
-
-			res.json('success');
-		});
+	    cb(null);
+	
 	});
+
+
 }
 
 
 var errNumbersForDailyPrice = [];
 
 function seriesDailyPriceFetch(exch_symbol, date, pageNumbers, main_cb) {
+
 	async.eachSeries(pageNumbers, function (page_number, next)
 		{
 		    fetchDailyPriceHistoriesInPage(exch_symbol, date, page_number, (err, total_pages, total_count) =>
@@ -242,8 +233,6 @@ function seriesDailyPriceFetch(exch_symbol, date, pageNumbers, main_cb) {
 					errNumbersForDailyPrice = [];
 				}
 			}
-
-
 		}
 	);
 }
@@ -303,44 +292,163 @@ function fetchDailyPriceHistoriesInPage (exch_symbol, date, pageNumber, cb) {
 }
 
 
+function saveTotalDailyPriceHistories(cb) {
+
+	var bulk = History.collection.initializeOrderedBulkOp();
+
+    for (var i = 0; i < totalDailyPriceHistoriesArray.length; i++) {
+    	var history = totalDailyPriceHistoriesArray[i];
+    	var real_date = parseDate(history.date);
+
+	    bulk.find({ 'ticker': history.ticker, date: real_date }).upsert().updateOne({ 
+	        "$set": { 'ticker': history.ticker,
+	        		  'date': real_date,
+	        		  'adj_close_price': history.adj_close }
+	    });
+    }
+    console.log('Saving on database...')
+    bulk.execute(function(err, result) {
+    	if (err) {
+    		console.log(err);
+    		cb(err);
+            return;
+	    }
+	   	console.log('All price data is successfully saved on database');
+   		console.log(new Date);
+
+		cb(null);
+	});
+}
 
 
+///////////// Security Update ///////////////
 
 
+function updateTradingSecurities(date, cb){
 
+	console.log('\n');
+	console.log('************ Start Update Watchlist(trading securities) for ' + date + ' ***************');
 
-
-exports.fetchPriceHistories = function(req, res) {
-
-	console.log('Start Fetch.....');
-	console.log(new Date);
-
-	Security.find({ticker:'A'}).sort({ticker: 1}).exec(function(err, watches) {
-        if (err) {
-            res.status(402).send(err);
+    // Set all Securities is_trading as FALSE
+	Security.update({}, {$set: { is_trading: false }}, { multi: true }, function(err, result){
+    	if (err) {
+            cb(err, null);
             return;
         }
-	    if(watches.length == 0) {
-	        res.status(403).send('There is no watch')
-	        return;
+
+        // create and update is_trading as TRUE
+
+	    console.log('Updating trading securities on database...');
+	    var bulk = Security.collection.initializeOrderedBulkOp();
+	    for (var i = 0; i < totalDailyPriceHistoriesArray.length; i++) {
+	    	var tradingSecurity = totalDailyPriceHistoriesArray[i];
+
+		    bulk.find({ 'ticker': tradingSecurity.ticker }).upsert().updateOne({ 
+		        "$set": { 'ticker': tradingSecurity.ticker,
+		        		  'is_trading': true }
+		    });
 	    }
-
-	    console.log(watches);
-
-	    fetchPriceHistoriesForSecurities(watches, function(err){
+	    bulk.execute(function(err, result) {
 	    	if (err) {
-	    		res.status(402).send(err);
-	    	} else {
-	    		res.json('success');
-	    	}
-	    });
- 
-    });   
+	    		console.log(err);
+	    		cb(err, null);
+	            return;
+		    }
+		   	console.log('Create or Update all securities are marked as is_trading');
+		   	
+		   	// Find new additional securities
+		   	console.log('Finding new securities...');
+		   	Security.find({is_trading: true, name: null}).sort({ticker:1}).exec(function(err, newSecurities){
+				if (err) {
+		            cb(err, null);
+		            return;
+		        } 
+		        console.log('\n');
+		        console.log('There are ' + newSecurities.length + ' new securities');
+
+		        console.log(_.map(newSecurities, 'ticker'));
+
+		        // Complete new securities (add name, figi_ticker items)
+		        updateNewSecurities(newSecurities, function(err){
+		        	if (err) {
+		        		console.log(err);
+		        	} else {
+		        		console.log('Complete adding name, figi_tickers on all new securities');
+		        		cb(null, newSecurities);
+		        	}
+		        });
+		   	});
+		});
+    }); 
 
 }
 
 
+
+
+function updateNewSecurities (newSecurities, cb) {
+
+	async.eachSeries(newSecurities, function (newSecurity, next) {
+		completeSecuritiy(newSecurity, function(err){
+			next();
+		});
+
+	}, function (err){
+	    if (err) {
+	        console.error('Error: ' + err.message);
+	        cb(err);
+	        return;
+	    }
+	    cb(null);
+	});
+
+}
+
+
+function completeSecuritiy (newSecurity, cb) {
+
+	var ticker = newSecurity.ticker;
+
+	var url = Config.intrinio_base_url + 'securities';
+	var qs = {'identifier' : ticker};
+
+	request(
+	    {   url : url,
+	        headers : {"Authorization" : Config.intrinio_header},
+	        qs: qs
+	    },
+	    function (error, response, body) {
+	    	if (error) {
+	    		console.log(error);
+	    		cb(error);
+	    		return;
+	    	}
+	    	var json =  JSON.parse(body);
+
+	    	newSecurity.name = json.security_name;
+	    	newSecurity.figi_ticker = json.figi_ticker
+
+	        newSecurity.save(function(err, data) {
+	            if (err) {
+	                cb(err);
+	                console.log(err);
+	                return;
+	            }
+	            console.log('Successfully Update security ' + ticker); 
+	            cb(null);
+	        });
+	    }
+	);
+}
+
+
+//////////////  Fetch Historical Prices of new securities ////////////////////////
+
+
 function fetchPriceHistoriesForSecurities(watches, cb) {
+
+	console.log('\n');
+	console.log('******** Start Fetch Historical prices for new securities *******');
 
 	async.eachSeries(watches, function (watch, next)
 		{
@@ -349,11 +457,11 @@ function fetchPriceHistoriesForSecurities(watches, cb) {
 			if (watch.last_date) {
 				startDate = formatDate(watch.last_date);
 			} else {
-				startDate = '1996-01-01';
+				startDate =  '1996-01-01'; //
 			}
 
-			console.log(startDate);
-			console.log('********** Start Fetch : ' + ticker + ' ***********');
+			console.log('----- Start Fetch : ' + ticker + ' ----');
+			console.log('From ' + startDate);
 
 
 			fetchHistoriesInPage(ticker, startDate, 1, (err, total_pages) => {
@@ -375,7 +483,7 @@ function fetchPriceHistoriesForSecurities(watches, cb) {
 					if (error) {
 						next(err);					
 					} else {
-						console.log('********** Finish Fetch : ' + ticker + ' ***********');
+						console.log('----- Finish Fetch : ' + ticker + ' ------');
 						watch.update({$set: {last_date: parseDate(formatDate(new Date()))}}, function(sub_error) {
 							if (sub_error){
 								console.log(sub_error);
@@ -436,12 +544,9 @@ function seriesFetch(identifier, startDate, pageNumbers, main_cb) {
 				}
 			}
 
-
 		}
 	);
 }
-
-
 
 
 
@@ -504,9 +609,9 @@ function fetchHistoriesInPage (identifier, startDate, pageNumber, cb) {
 				    		cb(err. null);
 				    		return;
 				    	}
-				        console.log('Histories in Page %d was saved with some duplicated errors.', current_page);
+				        console.log('Page %d is saved with duplicating', current_page);
 				    } else {
-				        console.log('Histories in Page %d was saved without duplicated errors.', current_page);
+				        console.log('Page %d is saved without duplicating', current_page);
 				    }
 				    cb(null, total_pages);
 				});
@@ -519,158 +624,16 @@ function fetchHistoriesInPage (identifier, startDate, pageNumber, cb) {
 }
 
 
-exports.updateDailyReturnHistories = function(req, res){
-	var date = req.body.date;
+////////// Calculate and Update Returns for new securities ////////
 
-	updateDailyReturnForAllSecurities(date, function(err, result){
-		if (err) {
-			res.json(err);
-		} else {
-			res.json(result);
-		}
-
-	});
-}
-
-
-
-function updateDailyReturnForAllSecurities(date, cb){
-	
-	console.log('\n');
-	console.log('************ Start Update Daily Returns for ' + date + ' ***************');
-
-	//console.log('The count of all securities is: ' + totalDailyPriceHistoriesArray.length);
-
-	var last_date = parseDate(date);
-
-	History.find({ date: last_date }).sort( { ticker : 1 } ).exec(function(err, histories) {
-        if (err) {
-            cb(err);
-            return;
-        }
-	    if(histories.length == 0) {
-	        cb(err);
-            return;
-	    }
-
-	    console.log(histories);
-
-		console.log('The count of today histories is: ' + histories.length);
-
-		var aggregation = History.aggregate(
-							[
-							    {
-							    	$match: {
-						                date: {$lt: last_date}
-						            }
-						        },
-							 	{$sort: {ticker:1, date: -1}}, 
-							 	{
-							 		$group: {_id: "$ticker",
-								       		data: {$first : "$$ROOT"}            
-									}
-								}
-						    ]);
-
-	    aggregation.options = { allowDiskUse: true };
-
-		aggregation.exec(function (err, previousHistories) {
-	        if (err) {
-	        	console.log(err);
-	            cb(err, null);
-	        } else {
-	        	console.log(previousHistories);
-	        	console.log(previousHistories.length);
-
-	        	var bulk = History.collection.initializeOrderedBulkOp();
-
-		        for (var i = 0; i < histories.length; i++) {
-		        	var history = histories[i];
-		        	var ticker = history.ticker;
-		        	var previousHistory = _.find(previousHistories, {"_id": ticker});
-
-		        	if (previousHistory) {
-		        		var stockReturn = (history.adj_close_price - previousHistory.data.adj_close_price) / previousHistory.data.adj_close_price;
-					    bulk.find({ "_id": history._id }).updateOne({ 
-					        "$set": { "return": stockReturn }
-					    });
-		        	} else {
-		        		console.log(ticker);
-		        	}
-		        }
-
-		        bulk.execute(function(err1, result) {
-			    	if (err) {
-		 				console.log('err1');
-			            cb(err)
-			            return;
-				    }
-				    console.log('All return is successfully updated');
-				    cb(null);
-				});
-
-	        }
-	    });
-
-	});
-
-}
-
-
-exports.completeUpdateReturns = function(req, res){
+function updateReturnHistoriesForSecurities(watches, cb){
 
 	console.log('\n');
-	console.log('********** Start update missing returns **********');
+	console.log('******** Start Update Historical Returns for new securities *******');
 
-	getReturnMissedSecurities(function(err, results){
-		if (err) {
-			res.json(err);
-		} else {
-			updateReturnHistoriesForSecurities(results, function(error){
-				if (error) {
-					res.json(err);
-				} else {
-					res.json('success');
-				}
-			});
-		}
-	});
-}
-
-
-function getReturnMissedSecurities(cb){
-
-	console.log('Finding return missing securities...');
-	
-	var aggregation = History.aggregate(
-						[
-						    { $match: {	return: null } },
-						 	{ $sort: { ticker:1 } }, 
-						 	{ $group: {_id: "$ticker", count: { $sum : 1 } } }
-					    ]);
-
-    aggregation.options = { allowDiskUse: true };
-	aggregation.exec(function (err, results) {
-        if (err) {
-        	console.log(err);
-            cb(err, null);
-        } else {
-        	var missings = _.filter(results, function(o) { return o.count > 1 ; });
-        	console.log(missings);
-        	console.log("All missing securities count is " + missings.length);
-            cb(null, missings);
-        }
-    });
-}
-
-function updateReturnHistoriesForSecurities(missingSecurities, cb){
-
-	console.log('\n');
-	console.log('******** Start Update Missed Returns *******');
-
-	async.eachSeries(missingSecurities, function (result, next)
+	async.eachSeries(watches, function (watch, next)
 		{
-			var ticker = result._id;
+			var ticker = watch.ticker;
 
 			seriesHistoricalReturnUpdate(ticker, function(err){
 				if (err) {
@@ -690,6 +653,7 @@ function updateReturnHistoriesForSecurities(missingSecurities, cb){
 		}
 	);
 }
+
 
 function seriesHistoricalReturnUpdate(identifier, cb) {
 
@@ -729,8 +693,95 @@ function seriesHistoricalReturnUpdate(identifier, cb) {
 
 }
 
-//////////////////////
 
+///////// Update Daily return  //////////////
+
+
+
+
+function updateDailyReturnForAllSecurities(date, cb){
+	
+	console.log('\n');
+	console.log('************ Start Update Daily Returns for ' + date + ' ***************');
+
+	var last_date = parseDate(date);
+
+	History.find({ date: last_date }).sort( { ticker : 1 } ).exec(function(err, histories) {
+        if (err) {
+            cb(err);
+            return;
+        }
+	    if(histories.length == 0) {
+	        cb(err);
+            return;
+	    }
+
+		console.log('The count of today histories is: ' + histories.length);
+		console.log('Fetching previous day histories from database...');
+
+		var aggregation = History.aggregate(
+							[
+							    {
+							    	$match: {
+						                date: {$lt: last_date}
+						            }
+						        },
+							 	{$sort: {ticker:1, date: -1}}, 
+							 	{
+							 		$group: {_id: "$ticker",
+								       		data: {$first : "$$ROOT"}            
+									}
+								}
+						    ]);
+
+	    aggregation.options = { allowDiskUse: true };
+
+		aggregation.exec(function (err, previousHistories) {
+	        if (err) {
+	        	console.log(err);
+	            cb(err);
+	        } else {
+
+	        	console.log('Fetched ' + previousHistories.length + 'previous day histories');
+
+	        	var bulk = History.collection.initializeOrderedBulkOp();
+		        for (var i = 0; i < histories.length; i++) {
+		        	var history = histories[i];
+		        	var ticker = history.ticker;
+		        	var previousHistory = _.find(previousHistories, {"_id": ticker});
+
+		        	if (previousHistory) {
+		        		var stockReturn = (history.adj_close_price - previousHistory.data.adj_close_price) / previousHistory.data.adj_close_price;
+					    bulk.find({ "_id": history._id }).updateOne({ 
+					        "$set": { "return": stockReturn }
+					    });
+		        	} 
+		        }
+		        console.log('Calculated and saving returns for all today securities on database....');
+
+		        bulk.execute(function(err1, result) {
+			    	if (err) {
+		 				console.log('err1');
+			            cb(err)
+			            return;
+				    }
+				    console.log('All return is successfully saved on database');
+				    cb(null);
+				});
+
+	        }
+	    });
+
+	});
+
+}
+
+
+
+
+
+
+////////// Helper Function //////////////////
 
 
 function parseDate(input) {

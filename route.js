@@ -16,4 +16,8 @@ module.exports = function(app) {
 	app.use('/api/companies', require('./api/companies'));
 	app.use('/api/securities', require('./api/securities'));
 	app.use('/api/histories', require('./api/histories'));
+	app.use('/api/watches', require('./api/watches'));
+	app.use('/api/fundamentals', require('./api/fundamentals'));
+	app.use('/api/correlations', require('./api/correlations'));
+	app.use('/api/cron', require('./api/cron'));
 };
