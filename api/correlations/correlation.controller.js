@@ -204,6 +204,7 @@ function seriesUpdateCorrelations(identifier, watchlist, returns, cb) {
 	    } else {
 	        console.log(identifier + ' Correlation was saved without errors.');
 	    }
+	    correlationArray = null;
 	    cb(null);
 	});
 }
