@@ -102,7 +102,7 @@ exports.createCorrelations = function (req, res) {
 				if (err) {
 		            res.status(402).send(err);
 				} else {
-					console.log(returns);
+					console.log(returns.length);
 					async.eachSeries(watchlist, function(identifier, next)
 						{
 							seriesUpdateCorrelations(identifier, watchlist, returns, function(err){
