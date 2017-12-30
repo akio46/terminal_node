@@ -191,6 +191,7 @@ function seriesUpdateCorrelations(identifier, watchlist, returns, cb) {
 	}
 
 	if (correlationArray.length == 0) {
+	    correlationArray = null;
 		cb(null);
 		return;
 	}
